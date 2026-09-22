@@ -1,0 +1,24 @@
+# Build artifacts
+*.exe
+*.pdb
+*.obj
+*.ilk
+*.exp
+*.lib
+
+# User-specific / IDE
+.vs/
+*.user
+*.suo
+*.userprefs
+
+# OS junk
+Thumbs.db
+desktop.ini
+*.lnk
+.DS_Store
+
+# Local scratch
+_qa_*
+test_*
+*.log
