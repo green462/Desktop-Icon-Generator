@@ -23,8 +23,7 @@
 
 ## 截图
 
-<!-- 欢迎 PR 补充截图：双击 exe → 搜索框输入关键词 → 截图放至 docs/screenshot.png → 取消下一行注释 -->
-<!-- ![界面截图](docs/screenshot.png) -->
+![界面截图](docs/screenshot.png)
 
 ## 快速开始
 

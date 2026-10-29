@@ -15,6 +15,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -169,6 +170,10 @@ namespace DesktopShortcutTool
         /// <summary>释放 SHParseDisplayName 返回的 PIDL。</summary>
         [DllImport("shell32.dll")]
         public static extern void ILFree(IntPtr pidl);
+
+        /// <summary>声明本进程为 DPI 感知,避免高分屏上整窗被系统位图拉伸而发虚。</summary>
+        [DllImport("user32.dll")]
+        public static extern bool SetProcessDPIAware();
     }
 
     /// <summary>
@@ -476,157 +481,633 @@ namespace DesktopShortcutTool
     }
 
     // =================================================================
-    // 五、GUI 模式(WinForms,全中文界面)
+    // 五、GUI 模式(雾霭蓝调 · Pages 风格自绘界面)
+    //     只负责呈现与交互,枚举/创建逻辑仍在 ShortcutTool 中,未作改动。
     // =================================================================
 
+    /// <summary>主题令牌:改配色只需改这里。</summary>
+    internal static class UiTheme
+    {
+        public static readonly Color Background = Color.FromArgb(0x6E, 0x8B, 0xB8);
+        public static readonly Color BlobA = Color.FromArgb(40, 0x87, 0xA0, 0xC6);
+        public static readonly Color BlobB = Color.FromArgb(58, 0xB9, 0xCB, 0xE2);
+        public static readonly Color Card = Color.White;
+        public static readonly Color Primary = Color.FromArgb(0x4E, 0x6E, 0x9E);
+        public static readonly Color PrimaryHover = Color.FromArgb(0x44, 0x61, 0x8C);
+        public static readonly Color PrimaryDisabled = Color.FromArgb(0xB9, 0xCB, 0xE2);
+        public static readonly Color Tint = Color.FromArgb(0xEE, 0xF3, 0xFA);
+        public static readonly Color Ink = Color.FromArgb(0x10, 0x18, 0x26);
+        public static readonly Color Muted = Color.FromArgb(0x6B, 0x7C, 0x93);
+        public static readonly Color Hint = Color.FromArgb(0x8A, 0x9A, 0xAE);
+        public static readonly Color Divider = Color.FromArgb(0xE6, 0xED, 0xF5);
+        public static readonly Color RowHover = Color.FromArgb(0xF5, 0xF8, 0xFC);
+        public static readonly Color RowLine = Color.FromArgb(0xF0, 0xF4, 0xF9);
+        public static readonly Color Success = Color.FromArgb(0x3F, 0x7D, 0x5C);
+        public static readonly Color Warning = Color.FromArgb(0xA9, 0x77, 0x2B);
+        public static readonly Color Danger = Color.FromArgb(0xB4, 0x42, 0x3E);
+        public static readonly Color ChipDesktopBack = Color.FromArgb(0xF1, 0xEF, 0xE8);
+        public static readonly Color ChipDesktopFore = Color.FromArgb(0x5F, 0x5E, 0x5A);
+        public static readonly Color CheckBorder = Color.FromArgb(0xC3, 0xD0, 0xE0);
+        public static readonly Color TitleBarText = Color.FromArgb(217, 255, 255, 255);
+
+        public const string Family = "Microsoft YaHei UI";
+
+        // 字体以 pt 为单位,系统 DPI 变化时由 GDI+ 自动换算像素,故这里不做手动缩放。
+        public static readonly Font TitleFont = new Font(Family, 14F, FontStyle.Bold);
+        public static readonly Font BodyFont = new Font(Family, 9F);
+        public static readonly Font SmallFont = new Font(Family, 8.25F);
+        public static readonly Font TinyFont = new Font(Family, 7.9F);
+        public static readonly Font SearchFont = new Font(Family, 9.5F);
+
+        /// <summary>读取系统 DPI 相对 96 的倍率(100% → 1.0,150% → 1.5),用于几何尺寸缩放。</summary>
+        public static float DetectScale()
+        {
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float s = g.DpiX / 96F;
+                return s <= 0 ? 1F : s;
+            }
+        }
+
+        /// <summary>圆角矩形路径(radius 为圆角半径)。</summary>
+        public static GraphicsPath RoundRect(Rectangle bounds, int radius)
+        {
+            var path = new GraphicsPath();
+            if (radius <= 1 || bounds.Width <= 2 || bounds.Height <= 2)
+            {
+                path.AddRectangle(bounds);
+                return path;
+            }
+            int d = Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height));
+            path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
+            path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
+            path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+            path.AddArc(bounds.X, bounds.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        public static void FillRound(Graphics g, Rectangle bounds, int radius, Color color)
+        {
+            using (GraphicsPath path = RoundRect(bounds, radius))
+            using (var brush = new SolidBrush(color))
+            {
+                g.FillPath(brush, path);
+            }
+        }
+
+        public static void DrawRound(Graphics g, Rectangle bounds, int radius, Color color, float width)
+        {
+            using (GraphicsPath path = RoundRect(bounds, radius))
+            using (var pen = new Pen(color, width))
+            {
+                g.DrawPath(pen, path);
+            }
+        }
+    }
+
+    /// <summary>无边框胶囊主按钮。</summary>
+    internal sealed class PillButton : Control
+    {
+        private bool _hover;
+
+        public PillButton()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw |
+                     ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+            Cursor = Cursors.Hand;
+            Font = UiTheme.SmallFont;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hover = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hover = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            Cursor = Enabled ? Cursors.Hand : Cursors.Default;
+            Invalidate();
+            base.OnEnabledChanged(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            Color fill = !Enabled ? UiTheme.PrimaryDisabled : (_hover ? UiTheme.PrimaryHover : UiTheme.Primary);
+            var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
+            UiTheme.FillRound(g, bounds, Height / 2, fill);
+            TextRenderer.DrawText(g, Text, Font, bounds, Color.White,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+    }
+
+    /// <summary>无边框文字按钮(用于「全选」「刷新」)。</summary>
+    internal sealed class TextButton : Control
+    {
+        private bool _hover;
+
+        public TextButton()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw |
+                     ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+            Cursor = Cursors.Hand;
+            Font = UiTheme.SmallFont;
+            ForeColor = UiTheme.Primary;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hover = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hover = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
+            if (_hover) UiTheme.FillRound(g, bounds, 6, UiTheme.Tint);
+            TextRenderer.DrawText(g, Text, Font, bounds, ForeColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+    }
+
+    /// <summary>
+    /// 自绘应用列表:表头 + 行(复选框 / 名称 / 类型胶囊 / 路径),支持滚轮滚动、悬停、双击直建。
+    /// </summary>
+    internal sealed class AppListView : Control
+    {
+        private readonly List<AppInfo> _rows = new List<AppInfo>();
+        private readonly HashSet<AppInfo> _checked = new HashSet<AppInfo>();
+        private int _scroll;
+        private int _hover = -1;
+        private float _scale = 1F;
+
+        public event EventHandler<AppInfo> CreateRequested;
+        public event EventHandler CheckedChanged;
+
+        public AppListView()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = UiTheme.Card;
+        }
+
+        public void SetScale(float scale)
+        {
+            _scale = scale <= 0 ? 1F : scale;
+            Invalidate();
+        }
+
+        private int P(int value)
+        {
+            return (int)Math.Round(value * _scale);
+        }
+
+        private int RowHeight { get { return P(37); } }
+        private int HeaderHeight { get { return P(26); } }
+        private int VisibleRows { get { int h = Height - HeaderHeight; return h > 0 ? h / RowHeight : 0; } }
+
+        private int NameX { get { return P(32); } }
+        private int ChipX { get { return (int)(Width * 0.46); } }
+        private int PathX { get { return (int)(Width * 0.60); } }
+
+        public int RowCount { get { return _rows.Count; } }
+        public int CheckedCount { get { return _checked.Count; } }
+
+        public bool AllChecked
+        {
+            get
+            {
+                if (_rows.Count == 0) return false;
+                foreach (AppInfo app in _rows)
+                {
+                    if (!_checked.Contains(app)) return false;
+                }
+                return true;
+            }
+        }
+
+        public void SetRows(IEnumerable<AppInfo> rows)
+        {
+            _rows.Clear();
+            _rows.AddRange(rows);
+            _scroll = 0;
+            _hover = -1;
+            Invalidate();
+        }
+
+        public void ToggleAll(bool check)
+        {
+            if (check)
+            {
+                foreach (AppInfo app in _rows) _checked.Add(app);
+            }
+            else
+            {
+                foreach (AppInfo app in _rows) _checked.Remove(app);
+            }
+            Invalidate();
+            RaiseCheckedChanged();
+        }
+
+        public List<AppInfo> GetChecked()
+        {
+            var result = new List<AppInfo>();
+            foreach (AppInfo app in _rows)
+            {
+                if (_checked.Contains(app)) result.Add(app);
+            }
+            return result;
+        }
+
+        private void RaiseCheckedChanged()
+        {
+            if (CheckedChanged != null) CheckedChanged(this, EventArgs.Empty);
+        }
+
+        private int HitRow(int y)
+        {
+            if (y < HeaderHeight) return -1;
+            int index = _scroll + (y - HeaderHeight) / RowHeight;
+            if (index < 0 || index >= _rows.Count) return -1;
+            return index;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            int index = HitRow(e.Y);
+            if (index != _hover)
+            {
+                _hover = index;
+                Invalidate();
+            }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            if (_hover != -1)
+            {
+                _hover = -1;
+                Invalidate();
+            }
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            int index = HitRow(e.Y);
+            if (index >= 0 && e.X <= P(30))
+            {
+                AppInfo app = _rows[index];
+                if (!_checked.Remove(app)) _checked.Add(app);
+                Invalidate();
+                RaiseCheckedChanged();
+            }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            int index = HitRow(e.Y);
+            if (index >= 0 && CreateRequested != null)
+            {
+                CreateRequested(this, _rows[index]);
+            }
+            base.OnMouseDoubleClick(e);
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            if (_rows.Count > VisibleRows)
+            {
+                int step = e.Delta > 0 ? -3 : 3;
+                int max = _rows.Count - VisibleRows;
+                _scroll = Math.Max(0, Math.Min(max, _scroll + step));
+                Invalidate();
+            }
+            base.OnMouseWheel(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            using (var background = new SolidBrush(UiTheme.Card))
+            {
+                g.FillRectangle(background, ClientRectangle);
+            }
+
+            // 表头
+            var headerFlags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding;
+            TextRenderer.DrawText(g, "应用名称", UiTheme.SmallFont, new Rectangle(NameX, 0, ChipX - NameX - P(8), HeaderHeight), UiTheme.Hint, headerFlags);
+            TextRenderer.DrawText(g, "类型", UiTheme.SmallFont, new Rectangle(ChipX, 0, PathX - ChipX - P(8), HeaderHeight), UiTheme.Hint, headerFlags);
+            TextRenderer.DrawText(g, "路径 / AUMID", UiTheme.SmallFont, new Rectangle(PathX, 0, Width - PathX - P(8), HeaderHeight), UiTheme.Hint, headerFlags);
+            using (var line = new Pen(UiTheme.Divider, 1F))
+            {
+                g.DrawLine(line, 0, HeaderHeight - 1, Width, HeaderHeight - 1);
+            }
+
+            int rowH = RowHeight;
+            int visible = VisibleRows;
+            int maxScroll = Math.Max(0, _rows.Count - visible);
+            if (_scroll > maxScroll) _scroll = maxScroll;
+
+            // 空结果提示
+            if (_rows.Count == 0)
+            {
+                var emptyRect = new Rectangle(0, HeaderHeight, Width, Math.Max(P(80), Height - HeaderHeight));
+                TextRenderer.DrawText(g, "未找到匹配的应用，换个关键词试试", UiTheme.BodyFont, emptyRect, UiTheme.Hint,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+
+            for (int i = 0; i <= visible && _scroll + i < _rows.Count; i++)
+            {
+                int index = _scroll + i;
+                AppInfo app = _rows[index];
+                var row = new Rectangle(0, HeaderHeight + i * rowH, Width - (maxScroll > 0 ? P(6) : 0), rowH);
+                bool isChecked = _checked.Contains(app);
+                bool isHover = index == _hover;
+
+                if (isChecked)
+                {
+                    UiTheme.FillRound(g, new Rectangle(row.Left + P(4), row.Top + P(2), row.Width - P(8), rowH - P(4)), P(8), UiTheme.RowHover);
+                    UiTheme.FillRound(g, new Rectangle(row.Left + P(4), row.Top + P(9), P(3), rowH - P(18)), P(2), UiTheme.Primary);
+                }
+                else if (isHover)
+                {
+                    UiTheme.FillRound(g, new Rectangle(row.Left + P(4), row.Top + P(2), row.Width - P(8), rowH - P(4)), P(8), UiTheme.RowHover);
+                }
+
+                // 复选框
+                int boxSize = P(14);
+                var box = new Rectangle(P(12), row.Top + (rowH - boxSize) / 2, boxSize, boxSize);
+                if (isChecked)
+                {
+                    UiTheme.FillRound(g, box, P(4), UiTheme.Primary);
+                    using (var check = new Pen(Color.White, Math.Max(1.2F, P(2) * 0.8F)))
+                    {
+                        g.DrawLines(check, new Point[]
+                        {
+                            new Point(box.Left + boxSize / 5, box.Top + boxSize / 2),
+                            new Point(box.Left + boxSize * 2 / 5, box.Top + boxSize * 3 / 4),
+                            new Point(box.Left + boxSize * 4 / 5, box.Top + boxSize / 4)
+                        });
+                    }
+                }
+                else
+                {
+                    UiTheme.DrawRound(g, box, P(4), UiTheme.CheckBorder, 1.2F);
+                }
+
+                // 名称
+                var nameRect = new Rectangle(NameX, row.Top, ChipX - NameX - P(10), rowH);
+                TextRenderer.DrawText(g, app.Name, UiTheme.BodyFont, nameRect, UiTheme.Ink,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+
+                // 类型胶囊
+                string chipText;
+                Color chipBack;
+                Color chipFore;
+                if (app.Kind == AppKind.Uwp)
+                {
+                    chipText = "UWP";
+                    chipBack = UiTheme.Tint;
+                    chipFore = UiTheme.Primary;
+                }
+                else if (app.Kind == AppKind.Desktop)
+                {
+                    chipText = "桌面";
+                    chipBack = UiTheme.ChipDesktopBack;
+                    chipFore = UiTheme.ChipDesktopFore;
+                }
+                else
+                {
+                    chipText = "不支持";
+                    chipBack = UiTheme.ChipDesktopBack;
+                    chipFore = UiTheme.Hint;
+                }
+                Size textSize = TextRenderer.MeasureText(g, chipText, UiTheme.TinyFont);
+                int chipW = textSize.Width + P(14);
+                int chipH = P(19);
+                var chip = new Rectangle(ChipX, row.Top + (rowH - chipH) / 2, chipW, chipH);
+                UiTheme.FillRound(g, chip, chipH / 2, chipBack);
+                TextRenderer.DrawText(g, chipText, UiTheme.TinyFont, chip, chipFore,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+                // 路径
+                var pathRect = new Rectangle(PathX, row.Top, row.Width - PathX - P(8), rowH);
+                TextRenderer.DrawText(g, app.Path ?? "", UiTheme.TinyFont, pathRect, UiTheme.Muted,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+
+                // 行分隔线
+                if (!isChecked)
+                {
+                    using (var line = new Pen(UiTheme.RowLine, 1F))
+                    {
+                        g.DrawLine(line, P(12), row.Bottom - 1, row.Right - P(8), row.Bottom - 1);
+                    }
+                }
+            }
+
+            // 滚动条
+            if (maxScroll > 0)
+            {
+                int trackTop = HeaderHeight;
+                int trackHeight = Height - HeaderHeight;
+                UiTheme.FillRound(g, new Rectangle(Width - P(4), trackTop + P(4), P(3), trackHeight - P(8)), P(2), UiTheme.Tint);
+                int thumbH = Math.Max(P(24), trackHeight * visible / _rows.Count);
+                int thumbY = trackTop + P(4) + (trackHeight - P(8) - thumbH) * _scroll / Math.Max(1, maxScroll);
+                UiTheme.FillRound(g, new Rectangle(Width - P(4), thumbY, P(3), thumbH), P(2), UiTheme.PrimaryDisabled);
+            }
+        }
+    }
+
+    /// <summary>主窗口:自绘圆角窗口 + 白色卡片 + 搜索 + 列表 + 主按钮。</summary>
     internal sealed class MainForm : Form
     {
-        private readonly TextBox _searchBox = new TextBox();
-        private readonly Label _searchPlaceholder = new Label();
-        private readonly ListView _listView = new ListView();
-        private readonly Button _btnSelectAll = new Button();
-        private readonly Button _btnCreate = new Button();
-        private readonly Label _statusLabel = new Label();
         private readonly List<AppInfo> _apps = new List<AppInfo>();
+        private readonly TextBox _search = new TextBox();
+        private readonly Label _searchHint = new Label();
+        private readonly AppListView _list = new AppListView();
+        private readonly PillButton _btnCreate = new PillButton();
+        private readonly TextButton _btnSelectAll = new TextButton();
+        private readonly TextButton _btnRefresh = new TextButton();
+
+        private string _statusText = "";
+        private Color _statusColor = UiTheme.Muted;
+        private float _scale = 1F;
+
+        private Rectangle _titleBar;
+        private Rectangle _card;
+        private Rectangle _searchRect;
+        private Rectangle _btnMin;
+        private Rectangle _btnClose;
+        private int _hoverChrome = -1;
+
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
+
+        private const int WM_NCLBUTTONDOWN = 0xA1;
+        private const int HTCAPTION = 0x2;
 
         public MainForm()
         {
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             SetupWindow();
-            SetupListView();     // Dock.Fill 必须最先加入
-            SetupBottomPanel();  // Dock.Bottom
-            SetupSearchPanel();  // Dock.Top
+            BuildUi();
             LoadApps();
         }
 
-        // ---------- 界面搭建 ----------
+        private int P(int value)
+        {
+            return (int)Math.Round(value * _scale);
+        }
 
         private void SetupWindow()
         {
             Text = "桌面快捷方式生成器";
-            ClientSize = new Size(640, 480);
-            MinimumSize = new Size(560, 420);
+            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
-            Font = new Font("Microsoft YaHei UI", 9F);
+            // 高 DPI 下按倍率放大整窗,所有坐标仍以 720×520 为设计稿基准。
+            _scale = UiTheme.DetectScale();
+            ClientSize = new Size(P(720), P(520));
+            MinimumSize = new Size(P(720), P(520));
+            MaximumSize = new Size(P(720), P(520));
+            AutoScaleMode = AutoScaleMode.None;
+            Font = UiTheme.BodyFont;
+            KeyPreview = true;
+            DoubleBuffered = true;
+            ShowIcon = false;
         }
 
-        /// <summary>顶部搜索框 + 占位文本。</summary>
-        private void SetupSearchPanel()
+        private void BuildUi()
         {
-            var panel = new Panel { Dock = DockStyle.Top, Height = 36, Padding = new Padding(8, 8, 8, 0) };
+            _scale = ClientSize.Width / 720F;
+            _titleBar = new Rectangle(0, 0, ClientSize.Width, P(34));
+            _card = new Rectangle(P(14), P(34), ClientSize.Width - P(28), ClientSize.Height - P(48));
+            _btnMin = new Rectangle(ClientSize.Width - P(74), P(8), P(26), P(20));
+            _btnClose = new Rectangle(ClientSize.Width - P(40), P(8), P(26), P(20));
 
-            _searchBox.Dock = DockStyle.Fill;
-            _searchBox.TextChanged += delegate { OnSearchTextChanged(); };
+            int pad = P(18);
+            _searchRect = new Rectangle(_card.Left + pad, _card.Top + P(70), _card.Width - pad * 2, P(34));
 
-            _searchPlaceholder.Text = "搜索应用…";
-            _searchPlaceholder.ForeColor = Color.Gray;
-            _searchPlaceholder.BackColor = Color.Transparent;
-            _searchPlaceholder.AutoSize = true;
-            _searchPlaceholder.Cursor = Cursors.IBeam;
-            _searchPlaceholder.Location = new Point(12, 10);
-            _searchPlaceholder.Click += delegate { _searchBox.Focus(); };
+            _search.BorderStyle = BorderStyle.None;
+            _search.BackColor = UiTheme.Tint;
+            _search.ForeColor = UiTheme.Ink;
+            _search.Font = UiTheme.SearchFont;
+            _search.Location = new Point(_searchRect.Left + P(32), _searchRect.Top + (_searchRect.Height - _search.PreferredHeight) / 2);
+            _search.Width = _searchRect.Width - P(46);
+            _search.TextChanged += OnSearchChanged;
 
-            panel.Controls.Add(_searchBox);
-            panel.Controls.Add(_searchPlaceholder);
-            Controls.Add(panel);
-        }
+            _searchHint.Text = "搜索应用（名称或路径）";
+            _searchHint.AutoSize = false;
+            _searchHint.BackColor = UiTheme.Tint;
+            _searchHint.ForeColor = UiTheme.Hint;
+            _searchHint.Font = UiTheme.SearchFont;
+            _searchHint.TextAlign = ContentAlignment.MiddleLeft;
+            _searchHint.Bounds = new Rectangle(_searchRect.Left + P(32), _searchRect.Top + P(2), _searchRect.Width - P(44), _searchRect.Height - P(4));
+            _searchHint.Cursor = Cursors.IBeam;
+            _searchHint.Click += delegate { _search.Focus(); };
 
-        /// <summary>中部应用列表(可勾选,双击直接创建)。</summary>
-        private void SetupListView()
-        {
-            _listView.View = View.Details;
-            _listView.CheckBoxes = true;
-            _listView.FullRowSelect = true;
-            _listView.MultiSelect = true;
-            _listView.HideSelection = false;
-            _listView.Dock = DockStyle.Fill;
-            _listView.Columns.Add("应用名称", 170);
-            _listView.Columns.Add("类型", 90);
-            _listView.Columns.Add("路径或 AUMID", 340);
-            _listView.MouseDoubleClick += OnListDoubleClick;
-            _listView.Resize += delegate { AdjustLastColumn(); };
-            Controls.Add(_listView);
-        }
-
-        /// <summary>底部操作按钮 + 多行状态栏。</summary>
-        private void SetupBottomPanel()
-        {
-            var panel = new Panel { Dock = DockStyle.Bottom, Height = 132, Padding = new Padding(8) };
-
-            var buttons = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                Height = 34,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false
-            };
-            _btnCreate.Text = "创建到桌面";
-            _btnCreate.Size = new Size(120, 28);
-            _btnCreate.Margin = new Padding(0, 3, 8, 3);
-            _btnCreate.Click += OnCreateClicked;
+            int toolbarY = _searchRect.Bottom + P(6);
             _btnSelectAll.Text = "全选";
-            _btnSelectAll.Size = new Size(80, 28);
-            _btnSelectAll.Margin = new Padding(0, 3, 8, 3);
+            _btnSelectAll.Bounds = new Rectangle(_card.Left + pad - P(6), toolbarY, P(54), P(24));
             _btnSelectAll.Click += OnSelectAllClicked;
-            buttons.Controls.Add(_btnCreate);
-            buttons.Controls.Add(_btnSelectAll);
 
-            _statusLabel.Dock = DockStyle.Fill;
-            _statusLabel.ForeColor = SystemColors.ControlText;
+            _btnRefresh.Text = "刷新";
+            _btnRefresh.Bounds = new Rectangle(_btnSelectAll.Right + P(4), toolbarY, P(54), P(24));
+            _btnRefresh.Click += delegate { LoadApps(); };
 
-            panel.Controls.Add(_statusLabel); // Dock.Fill 必须先于按钮面板加入
-            panel.Controls.Add(buttons);
-            Controls.Add(panel);
+            int listTop = toolbarY + P(28);
+            int listBottom = _card.Bottom - P(46);
+            _list.Bounds = new Rectangle(_card.Left + pad - P(8), listTop, _card.Width - (pad - P(8)) * 2, Math.Max(P(80), listBottom - listTop));
+            _list.SetScale(_scale);
+            _list.CreateRequested += delegate(object sender, AppInfo app) { CreateForApps(new AppInfo[] { app }); };
+            _list.CheckedChanged += delegate { UpdateCounts(); };
+
+            _btnCreate.Text = "创建到桌面";
+            _btnCreate.Bounds = new Rectangle(_card.Right - pad - P(112), _card.Bottom - P(44), P(112), P(32));
+            _btnCreate.Click += OnCreateClicked;
+
+            // 加入顺序决定 z 序:先加的先在上层,占位提示需要盖住输入框
+            Controls.Add(_searchHint);
+            Controls.Add(_search);
+            Controls.Add(_list);
+            Controls.Add(_btnSelectAll);
+            Controls.Add(_btnRefresh);
+            Controls.Add(_btnCreate);
+
+            Region = new Region(UiTheme.RoundRect(new Rectangle(0, 0, Width, Height), P(14)));
         }
 
-        // ---------- 数据加载与列表填充 ----------
+        // ---------- 数据 ----------
 
         private void LoadApps()
         {
-            List<AppInfo> apps;
             Cursor = Cursors.WaitCursor;
             try
             {
-                apps = ShortcutTool.EnumerateApps();
+                List<AppInfo> apps = ShortcutTool.EnumerateApps();
+                _apps.Clear();
+                _apps.AddRange(apps);
+                RebuildRows();
+                _statusColor = UiTheme.Muted;
+                _statusText = string.Format("共加载 {0} 个应用。勾选后点「创建到桌面」，或双击某一项直接创建。", _apps.Count);
             }
             catch (Exception ex)
             {
-                _statusLabel.Text = "加载应用列表失败: " + ex.Message;
-                return;
+                _statusColor = UiTheme.Danger;
+                _statusText = "加载应用列表失败：" + ex.Message;
             }
             finally
             {
                 Cursor = Cursors.Default;
             }
-
-            _apps.Clear();
-            _apps.AddRange(apps);
-            RepopulateList(_searchBox.Text);
-
-            int unsupported = 0;
-            foreach (AppInfo a in _apps)
-            {
-                if (a.Kind == AppKind.Unsupported) unsupported++;
-            }
-            string tip = string.Format("共加载 {0} 个应用。勾选后点“创建到桌面”,或双击某一项直接创建。", _apps.Count);
-            if (unsupported > 0) tip += string.Format("(另有 {0} 项系统未提供路径,暂不支持。)", unsupported);
-            _statusLabel.Text = tip;
+            UpdateCounts();
+            Invalidate();
         }
 
-        /// <summary>按过滤条件重新填充列表(即时过滤)。</summary>
-        private void RepopulateList(string filter)
+        private void RebuildRows()
         {
-            _listView.BeginUpdate();
-            _listView.Items.Clear();
+            string filter = _search.Text;
+            var visible = new List<AppInfo>();
             foreach (AppInfo app in _apps)
             {
-                if (!MatchesFilter(app, filter)) continue;
-                var item = new ListViewItem(app.Name);
-                item.SubItems.Add(app.KindText);
-                item.SubItems.Add(app.Path ?? "");
-                item.Tag = app;
-                _listView.Items.Add(item);
+                if (MatchesFilter(app, filter)) visible.Add(app);
             }
-            _listView.EndUpdate();
+            _list.SetRows(visible);
+            if (_searchHint != null) _searchHint.Visible = _search.TextLength == 0;
+            UpdateCounts();
         }
 
         private static bool MatchesFilter(AppInfo app, string filter)
@@ -636,71 +1117,46 @@ namespace DesktopShortcutTool
                 || (app.Path != null && app.Path.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
-        /// <summary>窗口缩放时让第三列(路径)占满剩余宽度。</summary>
-        private void AdjustLastColumn()
+        private void UpdateCounts()
         {
-            if (_listView.Columns.Count < 3) return;
-            int fixedWidth = _listView.Columns[0].Width + _listView.Columns[1].Width;
-            int width = _listView.ClientSize.Width - fixedWidth - 4;
-            _listView.Columns[2].Width = width > 220 ? width : 220;
+            _btnSelectAll.Text = _list.AllChecked ? "取消全选" : "全选";
+            _list.Invalidate();
+            Invalidate();
         }
 
-        // ---------- 事件处理 ----------
+        // ---------- 事件 ----------
 
-        private void OnSearchTextChanged()
+        private void OnSearchChanged(object sender, EventArgs e)
         {
-            _searchPlaceholder.Visible = _searchBox.TextLength == 0;
-            RepopulateList(_searchBox.Text);
+            RebuildRows();
         }
 
-        /// <summary>双击列表某一项 = 直接为该项创建快捷方式。</summary>
-        private void OnListDoubleClick(object sender, MouseEventArgs e)
-        {
-            if (_listView.SelectedItems.Count == 0) return;
-            var app = _listView.SelectedItems[0].Tag as AppInfo;
-            if (app == null) return;
-            CreateForApps(new AppInfo[] { app });
-        }
-
-        /// <summary>全选 / 取消全选(自动切换)。</summary>
         private void OnSelectAllClicked(object sender, EventArgs e)
         {
-            if (_listView.Items.Count == 0) return;
-            bool anyUnchecked = false;
-            foreach (ListViewItem item in _listView.Items)
-            {
-                if (!item.Checked) { anyUnchecked = true; break; }
-            }
-            foreach (ListViewItem item in _listView.Items)
-            {
-                item.Checked = anyUnchecked;
-            }
-            _btnSelectAll.Text = anyUnchecked ? "取消全选" : "全选";
+            _list.ToggleAll(!_list.AllChecked);
+            UpdateCounts();
         }
 
-        /// <summary>把所有勾选项创建为桌面快捷方式。</summary>
         private void OnCreateClicked(object sender, EventArgs e)
         {
-            var selected = new List<AppInfo>();
-            foreach (ListViewItem item in _listView.CheckedItems)
-            {
-                var app = item.Tag as AppInfo;
-                if (app != null) selected.Add(app);
-            }
+            List<AppInfo> selected = _list.GetChecked();
             if (selected.Count == 0)
             {
-                _statusLabel.Text = "请先勾选至少一个应用,或直接双击某一项。";
+                _statusColor = UiTheme.Warning;
+                _statusText = "请先勾选至少一个应用，或直接双击某一项。";
+                Invalidate();
                 return;
             }
             CreateForApps(selected);
         }
 
-        /// <summary>为若干应用创建快捷方式,并把每个结果写入状态栏。数量不大,同步执行 + 等待光标即可。</summary>
+        /// <summary>为若干应用创建快捷方式。数量不大，同步执行 + 等待光标即可。</summary>
         private void CreateForApps(IEnumerable<AppInfo> apps)
         {
             var list = new List<AppInfo>(apps);
             int success = 0;
-            var lines = new List<string>();
+            string last = "";
+            _btnCreate.Enabled = false;
             Cursor = Cursors.WaitCursor;
             try
             {
@@ -708,15 +1164,173 @@ namespace DesktopShortcutTool
                 {
                     CreateResult result = ShortcutTool.CreateShortcut(app);
                     if (result.Success) success++;
-                    lines.Add(string.Format("{0} {1}: {2}", result.Success ? "√" : "×", app.Name, result.Message));
+                    last = string.Format("{0} {1}：{2}", result.Success ? "[成功]" : "[失败]", app.Name, result.Message);
                 }
             }
             finally
             {
+                _btnCreate.Enabled = true;
                 Cursor = Cursors.Default;
             }
-            string summary = string.Format("本次操作:成功 {0} 个,失败 {1} 个。", success, list.Count - success);
-            _statusLabel.Text = summary + Environment.NewLine + string.Join(Environment.NewLine, lines.ToArray());
+            int failed = list.Count - success;
+            _statusColor = failed == 0 ? UiTheme.Success : (success == 0 ? UiTheme.Danger : UiTheme.Warning);
+            _statusText = string.Format("成功 {0} 个，失败 {1} 个 · {2}", success, failed, last);
+            Invalidate();
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape && _search.TextLength > 0)
+            {
+                _search.Clear();
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
+
+        // ---------- 窗口拖动与自绘标题栏按钮 ----------
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (_btnClose.Contains(e.Location))
+            {
+                Close();
+                return;
+            }
+            if (_btnMin.Contains(e.Location))
+            {
+                WindowState = FormWindowState.Minimized;
+                return;
+            }
+            if (_titleBar.Contains(e.Location))
+            {
+                ReleaseCapture();
+                SendMessage(Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            int hover = _btnClose.Contains(e.Location) ? 2 : (_btnMin.Contains(e.Location) ? 1 : 0);
+            if (hover != _hoverChrome)
+            {
+                _hoverChrome = hover;
+                Invalidate(new Rectangle(ClientSize.Width - P(84), 0, P(84), _titleBar.Bottom));
+            }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            if (_hoverChrome != -1)
+            {
+                _hoverChrome = -1;
+                Invalidate(new Rectangle(ClientSize.Width - P(84), 0, P(84), _titleBar.Bottom));
+            }
+            base.OnMouseLeave(e);
+        }
+
+        // ---------- 绘制 ----------
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            using (var brush = new SolidBrush(UiTheme.Background))
+            {
+                g.FillRectangle(brush, ClientRectangle);
+            }
+            using (var brush = new SolidBrush(UiTheme.BlobA))
+            {
+                g.FillEllipse(brush, new Rectangle(-P(90), P(130), P(320), P(240)));
+            }
+            using (var brush = new SolidBrush(UiTheme.BlobB))
+            {
+                g.FillEllipse(brush, new Rectangle(ClientSize.Width - P(250), P(30), P(320), P(260)));
+            }
+
+            UiTheme.FillRound(g, _card, P(16), UiTheme.Card);
+
+            int pad = P(18);
+            var titleRect = new Rectangle(_card.Left + pad, _card.Top + P(14), _card.Width - pad * 2 - P(96), P(28));
+            TextRenderer.DrawText(g, "桌面快捷方式生成器", UiTheme.TitleFont, titleRect, UiTheme.Ink,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            var subtitleRect = new Rectangle(_card.Left + pad, _card.Top + P(42), _card.Width - pad * 2 - P(96), P(18));
+            TextRenderer.DrawText(g, "为没有桌面图标的应用创建快捷方式", UiTheme.SmallFont, subtitleRect, UiTheme.Muted,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            // 应用总数胶囊
+            string countText = string.Format("{0} 个应用", _apps.Count);
+            Size countSize = TextRenderer.MeasureText(g, countText, UiTheme.SmallFont);
+            int pillWidth = countSize.Width + P(20);
+            int pillHeight = P(24);
+            var countPill = new Rectangle(_card.Right - pad - pillWidth, _card.Top + P(18), pillWidth, pillHeight);
+            UiTheme.FillRound(g, countPill, pillHeight / 2, UiTheme.Tint);
+            TextRenderer.DrawText(g, countText, UiTheme.SmallFont, countPill, UiTheme.Primary,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            // 搜索框底 + 放大镜
+            UiTheme.FillRound(g, _searchRect, _searchRect.Height / 2, UiTheme.Tint);
+            DrawMagnifier(g, _searchRect.Left + P(14), _searchRect.Top + _searchRect.Height / 2, P(5));
+
+            // 右侧已选/总数
+            string selection = string.Format("已选 {0} 项 · 共 {1} 项", _list.CheckedCount, _apps.Count);
+            var selectionRect = new Rectangle(_card.Left + _card.Width / 2, _searchRect.Bottom + P(4), _card.Width / 2 - pad, P(24));
+            TextRenderer.DrawText(g, selection, UiTheme.SmallFont, selectionRect, UiTheme.Muted,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            // 状态文字(单行省略)
+            int statusWidth = _btnCreate.Left - _card.Left - pad - P(12);
+            var statusRect = new Rectangle(_card.Left + pad, _card.Bottom - P(40), Math.Max(P(120), statusWidth), P(26));
+            TextRenderer.DrawText(g, _statusText, UiTheme.SmallFont, statusRect, _statusColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+
+            // 自绘标题栏
+            var titleBarText = new Rectangle(P(14), 0, ClientSize.Width - P(120), _titleBar.Bottom);
+            TextRenderer.DrawText(g, "桌面快捷方式生成器", UiTheme.SmallFont, titleBarText, UiTheme.TitleBarText,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            DrawChromeButton(g, _btnMin, false, _hoverChrome == 1);
+            DrawChromeButton(g, _btnClose, true, _hoverChrome == 2);
+        }
+
+        private void DrawChromeButton(Graphics g, Rectangle bounds, bool close, bool hover)
+        {
+            if (hover)
+            {
+                Color fill = close ? Color.FromArgb(70, 180, 66, 62) : Color.FromArgb(60, 255, 255, 255);
+                UiTheme.FillRound(g, bounds, P(6), fill);
+            }
+            Color glyph = UiTheme.TitleBarText;
+            using (var pen = new Pen(glyph, 1.3F))
+            {
+                int cx = bounds.Left + bounds.Width / 2;
+                int cy = bounds.Top + bounds.Height / 2;
+                if (close)
+                {
+                    int r = P(4);
+                    g.DrawLine(pen, cx - r, cy - r, cx + r, cy + r);
+                    g.DrawLine(pen, cx - r, cy + r, cx + r, cy - r);
+                }
+                else
+                {
+                    int r = P(5);
+                    g.DrawLine(pen, cx - r, cy + P(1), cx + r, cy + P(1));
+                }
+            }
+        }
+
+        private static void DrawMagnifier(Graphics g, int centerX, int centerY, int radius)
+        {
+            using (var pen = new Pen(UiTheme.Hint, 1.4F))
+            {
+                g.DrawEllipse(pen, centerX - radius, centerY - radius, radius * 2, radius * 2);
+                g.DrawLine(pen, centerX + radius - 1, centerY + radius - 1, centerX + radius + 3, centerY + radius + 3);
+            }
         }
     }
 
@@ -740,6 +1354,7 @@ namespace DesktopShortcutTool
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            Native.SetProcessDPIAware();
             Application.Run(new MainForm());
             return 0;
         }
