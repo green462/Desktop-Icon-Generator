@@ -644,6 +644,12 @@ namespace DesktopShortcutTool
             base.OnMouseLeave(e);
         }
 
+        protected override void OnTextChanged(EventArgs e)
+        {
+            Invalidate();
+            base.OnTextChanged(e);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
@@ -757,13 +763,25 @@ namespace DesktopShortcutTool
             return index;
         }
 
+        /// <summary>取某个可视行号的矩形区域,用于局部重绘,避免整窗闪烁。</summary>
+        private Rectangle RowRect(int visualIndex)
+        {
+            return new Rectangle(0, HeaderHeight + visualIndex * RowHeight, Width, RowHeight);
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
             int index = HitRow(e.Y);
             if (index != _hover)
             {
+                int old = _hover;
                 _hover = index;
-                Invalidate();
+                if (old != -1)
+                {
+                    int oldVisual = old - _scroll;
+                    if (oldVisual >= 0 && oldVisual < VisibleRows) Invalidate(RowRect(oldVisual));
+                }
+                if (index != -1) Invalidate(RowRect(index - _scroll));
             }
             base.OnMouseMove(e);
         }
@@ -772,8 +790,9 @@ namespace DesktopShortcutTool
         {
             if (_hover != -1)
             {
+                int oldVisual = _hover - _scroll;
                 _hover = -1;
-                Invalidate();
+                if (oldVisual >= 0 && oldVisual < VisibleRows) Invalidate(RowRect(oldVisual));
             }
             base.OnMouseLeave(e);
         }
@@ -785,7 +804,7 @@ namespace DesktopShortcutTool
             {
                 AppInfo app = _rows[index];
                 if (!_checked.Remove(app)) _checked.Add(app);
-                Invalidate();
+                Invalidate(RowRect(index - _scroll));
                 RaiseCheckedChanged();
             }
             base.OnMouseDown(e);
@@ -971,6 +990,12 @@ namespace DesktopShortcutTool
         private Rectangle _btnClose;
         private int _hoverChrome = -1;
 
+        /// <summary>「已选 N 项 · 共 M 项」文字区域,OnPaint 与局部重绘共用,避免坐标漂移。</summary>
+        private Rectangle SelectionTextRect
+        {
+            get { return new Rectangle(_card.Left + _card.Width / 2, _searchRect.Bottom + P(4), _card.Width / 2 - P(18), P(24)); }
+        }
+
         [DllImport("user32.dll")]
         private static extern bool ReleaseCapture();
 
@@ -982,7 +1007,8 @@ namespace DesktopShortcutTool
 
         public MainForm()
         {
-            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
+                     ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint, true);
             SetupWindow();
             BuildUi();
             LoadApps();
@@ -1120,8 +1146,7 @@ namespace DesktopShortcutTool
         private void UpdateCounts()
         {
             _btnSelectAll.Text = _list.AllChecked ? "取消全选" : "全选";
-            _list.Invalidate();
-            Invalidate();
+            Invalidate(SelectionTextRect);
         }
 
         // ---------- 事件 ----------
@@ -1279,7 +1304,7 @@ namespace DesktopShortcutTool
 
             // 右侧已选/总数
             string selection = string.Format("已选 {0} 项 · 共 {1} 项", _list.CheckedCount, _apps.Count);
-            var selectionRect = new Rectangle(_card.Left + _card.Width / 2, _searchRect.Bottom + P(4), _card.Width / 2 - pad, P(24));
+            var selectionRect = SelectionTextRect;
             TextRenderer.DrawText(g, selection, UiTheme.SmallFont, selectionRect, UiTheme.Muted,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
