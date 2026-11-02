@@ -8,7 +8,12 @@
 
 ## 直接下载
 
-不想编译？前往 [Releases](../../releases/latest) 下载 `AppShortcutCreator.exe`，双击即可运行（无需安装、无需 .NET 运行时下载，使用系统自带 .NET Framework 4.x）。
+不想编译？直接下载编译好的 `AppShortcutCreator.exe`，双击即可运行（无需安装、无需下载 .NET 运行时，使用系统自带 .NET Framework 4.x）。
+
+| 平台 | 下载入口 |
+| --- | --- |
+| GitHub | https://github.com/green462/Desktop-Icon-Generator/releases/latest |
+| Gitee | https://gitee.com/Green_jjj/desktop-icon-creation/releases/latest |
 
 > 首次运行若被 SmartScreen 提示，点击「更多信息」→「仍要运行」即可。这是未签名开源程序的正常提示。
 
@@ -29,13 +34,13 @@
 
 **方式一：直接下载（推荐普通用户）**
 
-从 [Releases](../../releases/latest) 下载 exe，双击运行。
+从 [GitHub Releases](https://github.com/green462/Desktop-Icon-Generator/releases/latest) 或 [Gitee 发行版](https://gitee.com/Green_jjj/desktop-icon-creation/releases/latest) 下载 exe，双击运行。
 
 **方式二：从源码编译（推荐开发者）**
 
 ```bat
-git clone https://github.com/<your-name>/desktop-shortcut-creator.git
-cd desktop-shortcut-creator
+git clone https://github.com/green462/Desktop-Icon-Generator.git
+cd Desktop-Icon-Generator
 build.bat
 ```
 
@@ -88,7 +93,7 @@ AppShortcutCreator.exe --list
 2|Microsoft Edge|UWP 应用|MSEdge
 3|记事本|桌面应用|C:\Windows\System32\notepad.exe
 ...
-# 共 210 个应用(其中 0 个因缺少路径信息暂不支持创建)
+# 共 212 个应用(其中 0 个因缺少路径信息暂不支持创建)
 ```
 
 **创建快捷方式**
@@ -110,10 +115,15 @@ AppShortcutCreator.exe --create 计算器
 
 ```text
 .
-├── AppShortcutCreator.cs   # 全部源码（单文件，C# 5 / .NET Framework 4.x）
-├── build.bat               # 一键编译脚本
-├── LICENSE                 # MIT
-└── README.md
+├── AppShortcutCreator.cs        # 全部源码（单文件，C# 5 / .NET Framework 4.x）
+├── build.bat                    # 一键编译脚本
+├── LICENSE                      # MIT
+├── README.md
+└── docs
+    ├── PRD.md                   # 产品需求文档（Story Design 六段式）
+    ├── screenshot.png           # 界面截图
+    ├── figma-guide.md           # Figma 原型绘制指南（完整坐标表）
+    └── figma-prototype.svg      # 可导入 Figma 的高保真底稿
 ```
 
 ## 常见问题
