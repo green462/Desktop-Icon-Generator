@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="520" viewBox="0 0 720 520">
+  <defs>
+    <clipPath id="win">
+      <rect x="0" y="0" width="720" height="520" rx="14" ry="14"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#win)">
+    <rect x="0" y="0" width="720" height="520" fill="#6E8BB8"/>
+    <ellipse cx="70" cy="250" rx="160" ry="120" fill="#57A0C6" opacity="0.157"/>
+    <ellipse cx="590" cy="160" rx="160" ry="130" fill="#B9CBE2" opacity="0.227"/>
+
+    <!-- 卡片 -->
+    <rect x="14" y="34" width="692" height="472" rx="16" ry="16" fill="#FFFFFF"/>
+
+    <!-- 卡片头部 -->
+    <text x="32" y="66" font-family="Microsoft YaHei UI" font-size="14" font-weight="bold" fill="#101826">桌面快捷方式生成器</text>
+    <text x="32" y="84" font-family="Microsoft YaHei UI" font-size="8.25" fill="#6B7C93">为没有桌面图标的应用创建快捷方式</text>
+
+    <!-- 总数胶囊 -->
+    <rect x="610" y="52" width="78" height="24" rx="12" ry="12" fill="#EEF3FA"/>
+    <text x="649" y="67" font-family="Microsoft YaHei UI" font-size="8.25" fill="#4E6E9E" text-anchor="middle">212 个应用</text>
+
+    <!-- 搜索框 -->
+    <rect x="32" y="104" width="656" height="34" rx="17" ry="17" fill="#EEF3FA"/>
+    <circle cx="46" cy="121" r="5" fill="none" stroke="#8A9AAE" stroke-width="1.4"/>
+    <line x1="49.5" y1="124.5" x2="53" y2="128" stroke="#8A9AAE" stroke-width="1.4"/>
+    <text x="60" y="125" font-family="Microsoft YaHei UI" font-size="9.5" fill="#8A9AAE">搜索应用（名称或路径）</text>
+
+    <!-- 工具栏 -->
+    <text x="26" y="160" font-family="Microsoft YaHei UI" font-size="8.25" fill="#4E6E9E">全选</text>
+    <text x="84" y="160" font-family="Microsoft YaHei UI" font-size="8.25" fill="#4E6E9E">刷新</text>
+    <text x="688" y="164" font-family="Microsoft YaHei UI" font-size="8.25" fill="#6B7C93" text-anchor="end">已选 1 项 · 共 212 项</text>
+
+    <!-- 列表表头 -->
+    <text x="56" y="189" font-family="Microsoft YaHei UI" font-size="8.25" fill="#8A9AAE">应用名称</text>
+    <text x="333" y="189" font-family="Microsoft YaHei UI" font-size="8.25" fill="#8A9AAE">类型</text>
+    <text x="427" y="189" font-family="Microsoft YaHei UI" font-size="8.25" fill="#8A9AAE">路径 / AUMID</text>
+    <line x1="24" y1="197.5" x2="696" y2="197.5" stroke="#E6EDF5" stroke-width="1"/>
+
+    <!-- 第 1 行（选中） -->
+    <rect x="28" y="200" width="664" height="33" rx="8" ry="8" fill="#F5F8FC"/>
+    <rect x="28" y="209" width="3" height="15" rx="2" ry="2" fill="#4E6E9E"/>
+    <rect x="36" y="209" width="14" height="14" rx="4" ry="4" fill="#4E6E9E"/>
+    <polyline points="39,216 41.6,218.5 47,212" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linejoin="round"/>
+    <text x="56" y="221" font-family="Microsoft YaHei UI" font-size="9" fill="#101826">计算器</text>
+    <rect x="333" y="206" width="38" height="19" rx="9.5" ry="9.5" fill="#EEF3FA"/>
+    <text x="352" y="219" font-family="Microsoft YaHei UI" font-size="7.9" fill="#4E6E9E" text-anchor="middle">UWP</text>
+    <text x="427" y="220" font-family="Microsoft YaHei UI" font-size="7.9" fill="#6B7C93">Microsoft.WindowsCalculator_8wekyb3d8bbwe!App</text>
+
+    <!-- 第 2 行 -->
+    <rect x="36" y="246" width="14" height="14" rx="4" ry="4" fill="none" stroke="#C3D0E0" stroke-width="1.2"/>
+    <text x="56" y="258" font-family="Microsoft YaHei UI" font-size="9" fill="#101826">微信</text>
+    <rect x="333" y="245" width="38" height="19" rx="9.5" ry="9.5" fill="#F1EFE8"/>
+    <text x="352" y="258" font-family="Microsoft YaHei UI" font-size="7.9" fill="#5F5E5A" text-anchor="middle">桌面</text>
+    <text x="427" y="257" font-family="Microsoft YaHei UI" font-size="7.9" fill="#6B7C93">D:\WeChat\WeChat.exe</text>
+    <line x1="36" y1="273.5" x2="688" y2="273.5" stroke="#F0F4F9" stroke-width="1"/>
+
+    <!-- 第 3 行 -->
+    <rect x="36" y="283" width="14" height="14" rx="4" ry="4" fill="none" stroke="#C3D0E0" stroke-width="1.2"/>
+    <text x="56" y="295" font-family="Microsoft YaHei UI" font-size="9" fill="#101826">截图工具</text>
+    <rect x="333" y="282" width="38" height="19" rx="9.5" ry="9.5" fill="#EEF3FA"/>
+    <text x="352" y="295" font-family="Microsoft YaHei UI" font-size="7.9" fill="#4E6E9E" text-anchor="middle">UWP</text>
+    <text x="427" y="294" font-family="Microsoft YaHei UI" font-size="7.9" fill="#6B7C93">Microsoft.ScreenSketch_8wekyb3d8bbwe!App</text>
+    <line x1="36" y1="310.5" x2="688" y2="310.5" stroke="#F0F4F9" stroke-width="1"/>
+
+    <!-- 状态栏 + 主按钮 -->
+    <text x="32" y="483" font-family="Microsoft YaHei UI" font-size="8.25" fill="#6B7C93">共加载 212 个应用。勾选后点「创建到桌面」，或双击某一项直接创建。</text>
+    <rect x="576" y="462" width="112" height="32" rx="16" ry="16" fill="#4E6E9E"/>
+    <text x="632" y="482" font-family="Microsoft YaHei UI" font-size="8.25" fill="#FFFFFF" text-anchor="middle">创建到桌面</text>
+
+    <!-- 自绘标题栏 -->
+    <text x="14" y="22" font-family="Microsoft YaHei UI" font-size="8.25" fill="#FFFFFF" opacity="0.85">桌面快捷方式生成器</text>
+    <rect x="646" y="8" width="26" height="20" rx="6" ry="6" fill="#FFFFFF" opacity="0.12"/>
+    <line x1="654" y1="19" x2="664" y2="19" stroke="#FFFFFF" stroke-width="1.3" opacity="0.85"/>
+    <rect x="680" y="8" width="26" height="20" rx="6" ry="6" fill="#B4524E" opacity="0.4"/>
+    <line x1="688" y1="13" x2="698" y2="23" stroke="#FFFFFF" stroke-width="1.3" opacity="0.85"/>
+    <line x1="698" y1="13" x2="688" y2="23" stroke="#FFFFFF" stroke-width="1.3" opacity="0.85"/>
+  </g>
+  <rect x="0.5" y="0.5" width="719" height="519" rx="14" ry="14" fill="none" stroke="#000000" opacity="0.06"/>
+</svg>
